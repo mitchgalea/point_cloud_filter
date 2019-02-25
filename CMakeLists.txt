@@ -12,9 +12,9 @@ find_package(catkin REQUIRED COMPONENTS
   message_generation
   roscpp
   sensor_msgs
+  tf
 )
 find_package(PCL 1.4 REQUIRED)
-find_package(OpenCV REQUIRED)
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
 
@@ -131,6 +131,9 @@ add_definitions(${PCL_DEFINITIONS})
 # add_library(${PROJECT_NAME}
 #   src/${PROJECT_NAME}/point_cloud_z_cutoff.cpp
 # )
+
+
+
 
 ## Add cmake target dependencies of the library
 ## as an example, code may need to be generated before libraries

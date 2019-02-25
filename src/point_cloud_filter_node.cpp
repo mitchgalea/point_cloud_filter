@@ -2,6 +2,10 @@
 #include "ros/ros.h"
 
 #include "sensor_msgs/PointCloud2.h"
+#include <tf/transform_listener.h>
+#include <tf2_ros/transform_listener.h>
+#include <geometry_msgs/TransformStamped.h>
+#include <geometry_msgs/PoseStamped.h>
 #include "pcl_conversions/pcl_conversions.h"
 #include "pcl/point_cloud.h"
 #include "pcl/point_types.h"
@@ -20,6 +24,9 @@ class PointCloudFilterNode{
     
     double lower_limit_;
     double upper_limit_;
+    double bracket_;
+
+
 
 public:
     PointCloudFilterNode(ros::NodeHandle nh)
@@ -29,32 +36,59 @@ public:
         pc_pub_ = nh_.advertise<pcl::PointCloud<pcl::PointXYZRGB> > ("/camera/depth/points/filtered", 100);
         
         ros::NodeHandle pn("~");
-        pn.param<double>("lower", lower_limit_, 0.0);
-        pn.param<double>("upper", upper_limit_, 2.0);
+        pn.param<double>("bracket", bracket_, 0.01);
+
+        tf2_ros::Buffer tfBuffer;
+        tf2_ros::TransformListener tfListener(tfBuffer);
+
+        bool listened = false;
+
+        while(!listened)
+        {
+            listened = true;
+            geometry_msgs::TransformStamped transformStamped;
+            try
+            {
+                transformStamped = tfBuffer.lookupTransform("camera_rgb_optical_frame", "base_scan",
+                                                            ros::Time(0));
+            }
+            catch (tf2::TransformException &ex) {
+                ros::Duration(1.0).sleep();
+                listened = false;
+            }
+            if(listened)
+            {
+                lower_limit_ = transformStamped.transform.translation.y - bracket_;
+                upper_limit_ = transformStamped.transform.translation.y + bracket_;
+            }
+        }
+
+
+
     }
 
 
     void pcCallback(const sensor_msgs::PointCloud2ConstPtr& pCloud)
     {
         pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZRGB>);
-        pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_filtered (new pcl::PointCloud<pcl::PointXYZRGB>);
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_y_filtered (new pcl::PointCloud<pcl::PointXYZRGB>);
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_z_filtered (new pcl::PointCloud<pcl::PointXYZRGB>);
 
         pcl::fromROSMsg (*pCloud, *cloud);
 
-        pcl::PassThrough<pcl::PointXYZRGB> pass;
-        pass.setInputCloud (cloud);
-        pass.setFilterFieldName ("y");
-        pass.setFilterLimits (lower_limit_, upper_limit_);
-
-        pass.filter (*cloud_filtered);
+        pcl::PassThrough<pcl::PointXYZRGB> y_pass;
+        y_pass.setInputCloud (cloud);
+        y_pass.setFilterFieldName ("y");
+        y_pass.setFilterLimits (lower_limit_, upper_limit_);
+        y_pass.filter (*cloud_y_filtered);
         
-		for (size_t l = 0; l < cloud_filtered->points.size(); l++)
-        {
-			auto b_hold = cloud_filtered->points[l].b;
-			cloud_filtered->points[l].b = cloud_filtered->points[l].r;
-			cloud_filtered->points[l].r = b_hold;
-        }
-        pc_pub_.publish(*cloud_filtered);
+        pcl::PassThrough<pcl::PointXYZRGB> z_pass;
+        z_pass.setInputCloud (cloud_y_filtered);
+        z_pass.setFilterFieldName ("z");
+        z_pass.setFilterLimits (0.1, 1.0);
+        z_pass.filter (*cloud_z_filtered);
+
+        pc_pub_.publish(*cloud_z_filtered);
 
     }
 };
