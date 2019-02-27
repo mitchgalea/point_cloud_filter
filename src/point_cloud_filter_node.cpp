@@ -41,7 +41,7 @@ public:
         
         ros::NodeHandle pn("~");
         pn.param<double>("bracket", bracket_, 0.001);
-        pn.param<double>("z_cutoff", bracket_, 4.00);
+        pn.param<double>("z_cutoff", z_cutoff_, 4.00);
 
         tf2_ros::Buffer tfBuffer;
         tf2_ros::TransformListener tfListener(tfBuffer);
@@ -102,7 +102,7 @@ public:
         pcl::PassThrough<pcl::PointXYZRGB> z_pass;
         z_pass.setInputCloud (cloud_y_filtered);
         z_pass.setFilterFieldName ("z");
-        z_pass.setFilterLimits (0.1, 3.0);
+        z_pass.setFilterLimits (0.1, z_cutoff_);
         z_pass.filter (*cloud_z_filtered);
         pc_pub_.publish(*cloud_z_filtered);
 
