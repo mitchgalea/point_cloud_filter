@@ -1,16 +1,17 @@
 
 #include "ros/ros.h"
 
-#include "sensor_msgs/PointCloud2.h"
+#include <sensor_msgs/PointCloud2.h>
 #include <tf/transform_listener.h>
 #include <tf2_ros/transform_listener.h>
 #include <geometry_msgs/TransformStamped.h>
 #include <geometry_msgs/PoseStamped.h>
-#include "pcl_conversions/pcl_conversions.h"
-#include "pcl/point_cloud.h"
-#include "pcl/point_types.h"
-#include "pcl/filters/passthrough.h"
+#include <pcl_conversions/pcl_conversions.h>
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
+#include <pcl/filters/passthrough.h>
 #include <pcl_ros/point_cloud.h>
+#include <pcl/filters/voxel_grid.h>
 
 #include <iostream>
 #include <string>
@@ -29,8 +30,9 @@ class PointCloudFilterNode{
     double upper_limit_;
     double bracket_;
     double z_cutoff_;
+    double voxel_;
 
-
+    bool noise_;
 
 public:
     PointCloudFilterNode(ros::NodeHandle nh)
@@ -40,8 +42,10 @@ public:
         pc_pub_ = nh_.advertise<pcl::PointCloud<pcl::PointXYZRGB> > ("/camera/depth/points/filtered", 100);
         
         ros::NodeHandle pn("~");
-        pn.param<double>("bracket", bracket_, 0.001);
+        pn.param<double>("bracket", bracket_, 0.01);
         pn.param<double>("z_cutoff", z_cutoff_, 4.00);
+        pn.param<double>("voxel", voxel_, 0.01);
+        pn.param<bool>("noise", noise_, false);
 
         tf2_ros::Buffer tfBuffer;
         tf2_ros::TransformListener tfListener(tfBuffer);
@@ -85,11 +89,17 @@ public:
         pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZRGB>);
         pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_y_filtered (new pcl::PointCloud<pcl::PointXYZRGB>);
         pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_z_filtered (new pcl::PointCloud<pcl::PointXYZRGB>);
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_voxel_filtered (new pcl::PointCloud<pcl::PointXYZRGB>);
 
         pcl::fromROSMsg (*pCloud, *cloud);
 
+        pcl::VoxelGrid<pcl::PointXYZRGB> voxel_grid;
+        voxel_grid.setInputCloud(cloud);
+        voxel_grid.setLeafSize (voxel_, voxel_, voxel_);
+        voxel_grid.filter (*cloud_voxel_filtered);
+
         pcl::PassThrough<pcl::PointXYZRGB> y_pass;
-        y_pass.setInputCloud (cloud);
+        y_pass.setInputCloud(cloud_voxel_filtered);
         y_pass.setFilterFieldName ("y");
         y_pass.setFilterLimits (lower_limit_, upper_limit_);
         y_pass.filter (*cloud_y_filtered);
