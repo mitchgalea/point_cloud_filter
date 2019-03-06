@@ -1,6 +1,5 @@
 
 #include "ros/ros.h"
-
 #include <sensor_msgs/PointCloud2.h>
 #include <tf/transform_listener.h>
 #include <tf2_ros/transform_listener.h>
@@ -19,25 +18,28 @@
 #include <chrono>
 #include <random>
 #include <math.h>
-
+////Point Cloud Filter Node Class
 class PointCloudFilterNode{
-
+    ////ROS MEMBERS
     ros::NodeHandle nh_;
     ros::Subscriber pc_sub_;
     ros::Publisher pc_pub_;
-    
+    ////PARAMETER MEMBERS
     double lower_limit_;
     double upper_limit_;
     double bracket_;
     double z_cutoff_;
     double voxel_;
-
+    ////BOOLEANS
     bool noise_;
+    bool set_;
 
 public:
+    ////CONSTRUCTOR
     PointCloudFilterNode(ros::NodeHandle nh)
-    : nh_(nh)
+    : nh_(nh), set_(false)
     {
+        //initializes subscriber and publisher
         pc_sub_= nh_.subscribe<sensor_msgs::PointCloud2> ("/camera/depth/points", 1, &PointCloudFilterNode::pcCallback, this);
         pc_pub_ = nh_.advertise<pcl::PointCloud<pcl::PointXYZRGB> > ("/camera/depth/points/filtered", 100);
         
@@ -47,11 +49,11 @@ public:
         pn.param<double>("voxel", voxel_, 0.01);
         pn.param<bool>("noise", noise_, false);
 
+        //gets transform from laser sensor frame to camera frame to determine Y filter cutoff
         tf2_ros::Buffer tfBuffer;
         tf2_ros::TransformListener tfListener(tfBuffer);
 
         bool listened = false;
-
         while(!listened)
         {
             listened = true;
@@ -67,8 +69,9 @@ public:
             }
             if(listened)
             {
-                lower_limit_ = transformStamped.transform.translation.y - 0.001;
-                upper_limit_ = transformStamped.transform.translation.y + 0.001;
+                lower_limit_ = transformStamped.transform.translation.y - bracket_;
+                upper_limit_ = transformStamped.transform.translation.y + bracket_;
+                set_ = true;
             }
         }
     }
@@ -81,40 +84,48 @@ public:
         std::normal_distribution<double> normal_distribution(0.0, std_dev);
 
         double n = normal_distribution(generator);
-
     }
 
     void pcCallback(const sensor_msgs::PointCloud2ConstPtr& pCloud)
     {
-        pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZRGB>);
-        pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_y_filtered (new pcl::PointCloud<pcl::PointXYZRGB>);
-        pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_z_filtered (new pcl::PointCloud<pcl::PointXYZRGB>);
-        pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_voxel_filtered (new pcl::PointCloud<pcl::PointXYZRGB>);
-
-        pcl::fromROSMsg (*pCloud, *cloud);
-
-        pcl::VoxelGrid<pcl::PointXYZRGB> voxel_grid;
-        voxel_grid.setInputCloud(cloud);
-        voxel_grid.setLeafSize (voxel_, voxel_, voxel_);
-        voxel_grid.filter (*cloud_voxel_filtered);
-
-        pcl::PassThrough<pcl::PointXYZRGB> y_pass;
-        y_pass.setInputCloud(cloud_voxel_filtered);
-        y_pass.setFilterFieldName ("y");
-        y_pass.setFilterLimits (lower_limit_, upper_limit_);
-        y_pass.filter (*cloud_y_filtered);
-
-        for(size_t i = 0; i < cloud_y_filtered->points.size(); i++)
+        if(set_)
         {
-            cloud_y_filtered->points[i].z += noise(cloud_y_filtered->points[i].z);
+            pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZRGB>);
+            pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_y_filtered (new pcl::PointCloud<pcl::PointXYZRGB>);
+            pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_z_filtered (new pcl::PointCloud<pcl::PointXYZRGB>);
+            pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_voxel_filtered (new pcl::PointCloud<pcl::PointXYZRGB>);
+            
+            //ros msg to pcl object
+            pcl::fromROSMsg (*pCloud, *cloud);
+            
+            //voxel grid filter
+            pcl::VoxelGrid<pcl::PointXYZRGB> voxel_grid;
+            voxel_grid.setInputCloud(cloud);
+            voxel_grid.setLeafSize (voxel_, voxel_, voxel_);
+            voxel_grid.filter (*cloud_voxel_filtered);
+            
+            //y filter
+            pcl::PassThrough<pcl::PointXYZRGB> y_pass;
+            y_pass.setInputCloud(cloud_voxel_filtered);
+            y_pass.setFilterFieldName ("y");
+            y_pass.setFilterLimits (lower_limit_, upper_limit_);
+            y_pass.filter (*cloud_y_filtered);
+
+            if(noise_)
+            {
+                for(size_t i = 0; i < cloud_y_filtered->points.size(); i++)
+                {
+                    cloud_y_filtered->points[i].z += noise(cloud_y_filtered->points[i].z);
+                }
+            }
+            //z filter
+            pcl::PassThrough<pcl::PointXYZRGB> z_pass;
+            z_pass.setInputCloud (cloud_y_filtered);
+            z_pass.setFilterFieldName ("z");
+            z_pass.setFilterLimits (0.1, z_cutoff_);
+            z_pass.filter (*cloud_z_filtered);
+            pc_pub_.publish(*cloud_z_filtered);
         }
-        
-        pcl::PassThrough<pcl::PointXYZRGB> z_pass;
-        z_pass.setInputCloud (cloud_y_filtered);
-        z_pass.setFilterFieldName ("z");
-        z_pass.setFilterLimits (0.1, z_cutoff_);
-        z_pass.filter (*cloud_z_filtered);
-        pc_pub_.publish(*cloud_z_filtered);
 
     }
 };
